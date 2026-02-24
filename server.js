@@ -5,22 +5,18 @@ const youtubedl = require('youtube-dl-exec');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de CORS para permitir que tu reproductor se conecte
 app.use(cors({
-    origin: '*', // En producción, pon aquí la URL de tu página web
+    origin: '*', 
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Permitir recibir JSON en el body de las peticiones
 app.use(express.json());
 
-// Ruta de Health Check (Para saber si el servidor está despierto)
 app.get('/', (req, res) => {
     res.json({ status: 'ok', message: 'Addictiverse Backend funcionando perfectamente en Node.js' });
 });
 
-// Ruta principal que usa tu reproductor
 app.post('/', async (req, res) => {
     const { url, action, id } = req.body;
 
@@ -31,22 +27,22 @@ app.post('/', async (req, res) => {
     console.log(`Procesando URL: ${url} | Acción: ${action}`);
 
     try {
-        // USO DE YT-DLP (MAGIA REAL): Extrae el link directo (m3u8 o mp4) sin descargar el video
+        // YT-DLP optimizado (se quitaron las opciones obsoletas)
+        // Se agregó un "User-Agent" para disimular que somos un servidor
         const videoInfo = await youtubedl(url, {
             dumpSingleJson: true,
             noWarnings: true,
-            noCallHome: true,
             noCheckCertificate: true,
             preferFreeFormats: true,
-            youtubeSkipDashManifest: true
+            addHeader: [
+                'referer:youtube.com',
+                'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
         });
 
-        // yt-dlp devuelve una lista de formatos. Buscamos el mejor disponible (hls/m3u8 o mp4)
         let directUrl = videoInfo.url; 
         
-        // Si no hay url directa en la raíz, buscamos en los formatos
         if (!directUrl && videoInfo.formats && videoInfo.formats.length > 0) {
-            // Priorizamos HLS (.m3u8) si existe
             const hlsFormat = videoInfo.formats.find(f => f.protocol === 'm3u8_native' || f.ext === 'mp4');
             directUrl = hlsFormat ? hlsFormat.url : videoInfo.formats[0].url;
         }
@@ -64,14 +60,13 @@ app.post('/', async (req, res) => {
     } catch (error) {
         console.error('Error al extraer el video:', error.message);
         
-        // Si falla (por ejemplo, si el Drive es privado), devolvemos la URL original como fallback
-        // o si es Drive, intentamos devolver un proxy básico
+        // Si YT-DLP falla por anti-bots, recurrimos al plan B de Google Drive
         if (action === 'extract_drive' && id) {
              const driveDirect = `https://drive.google.com/uc?export=download&id=${id}`;
              return res.json({ success: true, url: driveDirect, title: 'Video de Drive (Fallback)' });
         }
 
-        return res.json({ success: false, url: url });
+        return res.json({ success: false, url: url, error: error.message });
     }
 });
 
